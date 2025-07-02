@@ -44,6 +44,9 @@ def download_and_extract_zip(
 
 import os
 
+import os
+
+
 def ensure_paths(
     dirs_list: list[str] | None = None,
     file_paths: list[str] | None = None,
@@ -89,14 +92,14 @@ def ensure_paths(
                     if create_dir:
                         os.makedirs(d, exist_ok=True)
                     else:
-                        errors.append(f"Directory does not exist: {d}")
+                        errors.append(f"Directory does not exist: {d}. Create it or set create_dir=True.")
                         continue
                 if not os.access(d, os.R_OK):
-                    errors.append(f"Directory is not readable: {d}")
+                    errors.append(f"Directory is not readable: {d}. Set read permission: chmod +r '{d}'")
                 if not os.access(d, os.W_OK):
-                    errors.append(f"Directory is not writable: {d}")
+                    errors.append(f"Directory is not writable: {d}. Set write permission: chmod +w '{d}'")
             except Exception as e:
-                errors.append(f"Error handling directory {d}: {e}")
+                errors.append(f"Error handling directory '{d}': {e}")
 
     # --- Check files ---
     if file_paths:
@@ -107,23 +110,23 @@ def ensure_paths(
                     if create_file:
                         os.makedirs(parent, exist_ok=True)
                     else:
-                        errors.append(f"Parent directory does not exist: {parent}")
+                        errors.append(f"Parent directory does not exist: {parent}. Create it or set create_file=True.")
                         continue
 
                 if not os.path.exists(f):
                     if create_file:
                         open(f, 'a').close()
                     else:
-                        errors.append(f"File does not exist: {f}")
+                        errors.append(f"File does not exist: {f}. Create it or set create_file=True.")
                         continue
 
                 if not os.access(f, os.R_OK):
-                    errors.append(f"File is not readable: {f}")
+                    errors.append(f"File is not readable: {f}. Set read permission: chmod +r '{f}'")
                 if not os.access(f, os.W_OK):
-                    errors.append(f"File is not writable: {f}")
+                    errors.append(f"File is not writable: {f}. Set write permission: chmod +w '{f}'")
                 if not os.access(f, os.X_OK):
-                    errors.append(f"File is not executable: {f}")
+                    errors.append(f"File is not executable: {f}. Set execute permission: chmod +x '{f}'")
             except Exception as e:
-                errors.append(f"Error handling file {f}: {e}")
+                errors.append(f"Error handling file '{f}': {e}")
 
     return False if not errors else "\n".join(errors)
