@@ -42,26 +42,88 @@ def download_and_extract_zip(
     print("Done.")
 
 
-def ensure_paths_editable(paths_list):
-    """
-    For each path in `paths_list`, ensure its parent dir exists,
-    create the file if it doesn't exist, and verify it's writable.
-    Returns the first error (Exception or str), or False if all OK.
-    """
-    for path in paths_list:
-        try:
-            # 1) make sure parent directory exists
-            parent = os.path.dirname(path) or '.'
-            os.makedirs(parent, exist_ok=True)
-            # 2) touch the file if it doesn't exist
-            if not os.path.exists(path):
-                with open(path, 'a'):
-                    pass
-            # 3) verify writability
-            if not os.access(path, os.W_OK):
-                return f"Path not writable: {path}"
+import os
 
-        except Exception as e:
-            return e
+def ensure_paths(
+    dirs_list: list[str] | None = None,
+    file_paths: list[str] | None = None,
+    create_dir: bool = False,
+    create_file: bool = False
+) -> bool | str:
+    """
+    Ensure that the given directories and files exist and meet access requirements.
 
-    return False
+    Directories:
+      - If a dir in `dirs_list` does not exist:
+          • Create it if `create_dir` is True
+          • Otherwise report an error.
+      - Verify each dir is readable and writable.
+
+    Files:
+      - For each path in `file_paths`:
+          1. Ensure its parent directory exists:
+             • Create parents if `create_file` is True
+             • Otherwise report an error.
+          2. If the file itself is missing:
+             • Create it if `create_file` is True
+             • Otherwise report an error.
+          3. Verify the file is readable, writable, and executable.
+
+    Args:
+        dirs_list:     List of directories to check.
+        file_paths:    List of file paths to check.
+        create_dir:    If True, create missing directories.
+        create_file:   If True, create missing files (and their parents).
+
+    Returns:
+        False if all checks pass;
+        otherwise a newline-separated string describing every error found.
+    """
+    errors: list[str] = []
+
+    # --- Check directories ---
+    if dirs_list:
+        for d in dirs_list:
+            try:
+                if not os.path.exists(d):
+                    if create_dir:
+                        os.makedirs(d, exist_ok=True)
+                    else:
+                        errors.append(f"Directory does not exist: {d}")
+                        continue
+                if not os.access(d, os.R_OK):
+                    errors.append(f"Directory is not readable: {d}")
+                if not os.access(d, os.W_OK):
+                    errors.append(f"Directory is not writable: {d}")
+            except Exception as e:
+                errors.append(f"Error handling directory {d}: {e}")
+
+    # --- Check files ---
+    if file_paths:
+        for f in file_paths:
+            try:
+                parent = os.path.dirname(f) or '.'
+                if not os.path.exists(parent):
+                    if create_file:
+                        os.makedirs(parent, exist_ok=True)
+                    else:
+                        errors.append(f"Parent directory does not exist: {parent}")
+                        continue
+
+                if not os.path.exists(f):
+                    if create_file:
+                        open(f, 'a').close()
+                    else:
+                        errors.append(f"File does not exist: {f}")
+                        continue
+
+                if not os.access(f, os.R_OK):
+                    errors.append(f"File is not readable: {f}")
+                if not os.access(f, os.W_OK):
+                    errors.append(f"File is not writable: {f}")
+                if not os.access(f, os.X_OK):
+                    errors.append(f"File is not executable: {f}")
+            except Exception as e:
+                errors.append(f"Error handling file {f}: {e}")
+
+    return False if not errors else "\n".join(errors)
