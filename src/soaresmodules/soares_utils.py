@@ -7,17 +7,18 @@ from pathlib import Path
 
 def download_and_extract_zip(
     url: str,
-    dest_folder: str,
+    dest_folder: str | Path,
     unzip: bool = True,
     delete_zip: bool = True
-):
+) -> None:
     """
-    Works on Windows, MAC and Ubuntu.
-    Download a ZIP file from the given URL into the specified folder, optionally extract it, and optionally remove the archive.
+    Works on Windows, macOS, and Ubuntu.
+    Download a ZIP file from the given URL into the specified folder (string or Path),
+    optionally extract it, and optionally remove the archive.
 
     Args:
         url (str): URL of the ZIP file to download.
-        dest_folder (str): Path to the directory where the file will be saved (and extracted).
+        dest_folder (str | Path): Directory path (string or Path) where the file will be saved/extracted.
         unzip (bool): If True, extract the ZIP archive into `dest_folder` after download. Defaults to True.
         delete_zip (bool): If True, delete the downloaded ZIP file after extraction. Defaults to True.
 
@@ -25,12 +26,17 @@ def download_and_extract_zip(
         URLError, HTTPError: If downloading the file fails.
         zipfile.BadZipFile: If the downloaded file is not a valid ZIP archive.
     """
-    os.makedirs(dest_folder, exist_ok=True)
+    # Normalize destination to Path
+    dest_folder = Path(dest_folder)
+    dest_folder.mkdir(parents=True, exist_ok=True)
+
+    # Determine zip filename and full path
     zip_name = os.path.basename(url)
-    zip_path = os.path.join(dest_folder, zip_name)
+    zip_path = dest_folder / zip_name
 
     print(f"Downloading from {url}...")
-    urllib.request.urlretrieve(url, zip_path)
+    # urllib expects a string path
+    urllib.request.urlretrieve(url, str(zip_path))
 
     if unzip:
         print(f"Extracting to {dest_folder}...")
@@ -38,7 +44,7 @@ def download_and_extract_zip(
             zip_ref.extractall(dest_folder)
 
     if delete_zip:
-        os.remove(zip_path)
+        zip_path.unlink()
         print(f"Deleted zip file: {zip_path}")
 
     print("Done.")
