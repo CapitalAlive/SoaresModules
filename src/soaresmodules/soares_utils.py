@@ -1,6 +1,8 @@
 import os
 import urllib.request
 import zipfile
+import subprocess
+from pathlib import Path
 
 
 def download_and_extract_zip(
@@ -40,11 +42,6 @@ def download_and_extract_zip(
         print(f"Deleted zip file: {zip_path}")
 
     print("Done.")
-
-
-import os
-
-import os
 
 
 def ensure_paths(
@@ -130,3 +127,20 @@ def ensure_paths(
                 errors.append(f"Error handling file '{f}': {e}")
 
     return False if not errors else "\n".join(errors)
+
+
+def install_deb_deps(deps_file: Path):
+    """
+    Read package names from a `deb.deps` file (one per line)
+    and run `sudo apt-get install -y` on them.
+    """
+    pkgs = [line.strip() for line in deps_file.read_text().splitlines() if line.strip()]
+    if not pkgs:
+        print("No packages to install.")
+        return
+
+    cmd = ["sudo", "apt-get", "update"]
+    subprocess.run(cmd, check=True)
+
+    cmd = ["sudo", "apt-get", "install", "-y"] + pkgs
+    subprocess.run(cmd, check=True)
