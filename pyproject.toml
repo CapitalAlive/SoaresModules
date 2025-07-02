@@ -1,7 +1,7 @@
 [project]
 name = "soaresmodules"
 version = "0.1.0"
-description = "This package contains useful functions that I need in several projects"
+description = ""
 authors = [
     {name = "CapitalAlive",email = "120092274+CapitalAlive@users.noreply.github.com"}
 ]
@@ -9,6 +9,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
 ]
+
+[tool.poetry]
+packages = [{include = "soaresmodules", from = "src"}]
 
 
 [build-system]
