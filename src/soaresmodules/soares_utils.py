@@ -158,7 +158,7 @@ import subprocess
 import re
 from pathlib import Path
 
-def install_from_deps(deps_path: str | Path) -> None:
+def install_deb_deps(deps_path: str | Path) -> None:
     # 1) Read and normalize package names
     raw = Path(deps_path).read_text().splitlines()
     pkgs = []
