@@ -152,66 +152,80 @@ def ensure_paths(
     return False if not errors else "\n".join(errors)
 
 
+
 def install_deb_deps(deps_file: str | Path) -> None:
     """
-    Read package lines from `deb.deps`, resolve virtual packages,
-    and install everything in one shot without python-apt.
+    Read your deb.deps file, strip version constraints and alternates,
+    refresh apt’s cache, then for each entry:
+      1. Try `apt-cache show` → if it exists, install it.
+      2. Otherwise use `apt-cache showpkg` to parse its Provides: list
+         and pick the first real package.
+    Finally, install all the resolved names in one transaction.
     """
-    # 1) Read and clean deps file
+    # 1) Read + clean the deps file
     lines = Path(deps_file).read_text().splitlines()
     raw = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
 
-    # 2) Normalize names: strip "(...)" and split on "|"
+    # 2) Normalize: drop "(…)" and anything after "|"
     pkgs = [
         re.sub(r"\s*\([^)]*\)", "", ln).split("|", 1)[0].strip()
         for ln in raw
     ]
-
     if not pkgs:
         print("No packages to install.")
         return
 
-    # 3) Refresh package lists
+    # 3) Refresh apt
     subprocess.run(["sudo", "apt-get", "update"], check=True)
 
-    # 4) Resolve virtual packages and build install list
+    # 4) Resolve virtuals via apt-cache
     to_install = []
     for pkg in pkgs:
-        print(f"→ Checking {pkg}")
-        res = subprocess.run(
-            ["sudo", "apt-get", "install", "-y", "--simulate", pkg],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
+        print(f"→ Resolving {pkg}")
+        # a) If apt-cache show finds it, it’s a real package
+        show = subprocess.run(
+            ["apt-cache", "show", pkg],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
-        output = res.stdout
-        if res.returncode == 0:
+        if show.stdout:
             to_install.append(pkg)
+            continue
+
+        # b) Otherwise parse apt-cache showpkg for Provides:
+        sp = subprocess.run(
+            ["apt-cache", "showpkg", pkg],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        provider = None
+        seen = False
+        for line in sp.stdout.splitlines():
+            if line.startswith("Provides:"):
+                seen = True
+                continue
+            if seen:
+                if not line.startswith(" "):
+                    break
+                # line like " libasound2t64 1.2.11-1ubuntu0.1"
+                provider = line.strip().split()[0]
+                break
+
+        if provider:
+            print(f"    ↳ Virtual {pkg} → {provider}")
+            to_install.append(provider)
         else:
-            # Look for "Note, selecting 'realpkg' instead of 'pkg'"
-            m = re.search(
-                r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
-                output
-            )
-            if m:
-                real = m.group(1)
-                print(f"    ↳ Virtual {pkg} → {real}")
-                to_install.append(real)
-            else:
-                print(f"    ⚠️  Skipping {pkg}: no candidate")
+            print(f"    ⚠️  Skipping {pkg}: no candidate")
 
     if not to_install:
-        print("No installable packages found.")
+        print("Nothing to install.")
         return
 
-    # 5) Install all resolved packages
+    # 5) Install everything in one go
     print("Installing:", ", ".join(to_install))
     subprocess.run(
         ["sudo", "apt-get", "install", "-y", *to_install],
         check=True
     )
     print("Done.")
-
 
 
 if __name__ == "__main__":
