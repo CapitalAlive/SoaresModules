@@ -155,26 +155,41 @@ def ensure_paths(
 def install_deb_deps(deps_file: str | Path) -> None:
     """
     Read package names from a `deb.deps` file (one per line),
-    strip out version constraints and alternatives,
-    then run `sudo apt-get update` and `sudo apt-get install -y` on them.
+    simulate each install to resolve virtual-package providers,
+    then run `sudo apt-get install -y` on the real package names.
     """
     deps_path = Path(deps_file)
-    lines = deps_path.read_text().splitlines()
-    pkgs = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        # take only the first alternative, if any
-        candidate = line.split("|", 1)[0].strip()
-        # remove any version constraint in parentheses
-        name = re.sub(r"\s*\(.*\)$", "", candidate)
-        pkgs.append(name)
-
-    if not pkgs:
+    raw_pkgs = [line.strip() for line in deps_path.read_text().splitlines() if line.strip()]
+    if not raw_pkgs:
         print("No packages to install.")
         return
 
+    # Refresh package lists
     subprocess.run(["sudo", "apt-get", "update"], check=True)
-    subprocess.run(["sudo", "apt-get", "install", "-y", *pkgs], check=True)
+
+    resolved = []
+    for pkg in raw_pkgs:
+        try:
+            # simulate install to see if apt suggests a real provider
+            subprocess.run(
+                ["sudo", "apt-get", "install", "-y", "--simulate", pkg],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            resolved.append(pkg)
+        except subprocess.CalledProcessError as e:
+            note = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
+                             e.stderr)
+            if note:
+                resolved.append(note.group(1))
+            else:
+                print(f"Warning: no installable candidate found for '{pkg}', skipping.")
+
+    if not resolved:
+        print("No installable packages found.")
+        return
+
+    # Install all the real package names at once
+    subprocess.run(["sudo", "apt-get", "install", "-y", *resolved], check=True)
