@@ -3,6 +3,7 @@ import urllib.request
 import zipfile
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def download_and_extract_zip(
@@ -18,36 +19,35 @@ def download_and_extract_zip(
 
     Args:
         url (str): URL of the ZIP file to download.
-        dest_folder (str | Path): Directory path (string or Path) where the file will be saved/extracted.
-        unzip (bool): If True, extract the ZIP archive into `dest_folder` after download. Defaults to True.
-        delete_zip (bool): If True, delete the downloaded ZIP file after extraction. Defaults to True.
+        dest_folder (str | Path): Directory path where the file will be saved/extracted.
+        unzip (bool): If True, extract the ZIP archive into `dest_folder` after download.
+        delete_zip (bool): If True, delete the downloaded ZIP file after extraction.
 
     Raises:
         URLError, HTTPError: If downloading the file fails.
-        zipfile.BadZipFile: If the downloaded file is not a valid ZIP archive.
+        zipfile.BadZipFile: If the file is not a valid ZIP archive.
     """
-    # Normalize destination to Path
+    # 1) Ensure dest_folder is a Path and exists
     dest_folder = Path(dest_folder)
     dest_folder.mkdir(parents=True, exist_ok=True)
 
-    # Determine zip filename and full path
-    zip_name = os.path.basename(url)
+    # 2) Figure out a safe filename from the URL
+    zip_name = Path(urlparse(url).path).name
     zip_path = dest_folder / zip_name
 
-    print(f"Downloading from {url}...")
-    # urllib expects a string path
+    print(f"→ Downloading {url} …")
     urllib.request.urlretrieve(url, str(zip_path))
 
     if unzip:
-        print(f"Extracting to {dest_folder}...")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(dest_folder)
+        print(f"→ Extracting to {dest_folder} …")
+        with zipfile.ZipFile(zip_path, 'r') as archive:
+            archive.extractall(dest_folder)
 
     if delete_zip:
         zip_path.unlink()
-        print(f"Deleted zip file: {zip_path}")
+        print(f"→ Removed archive {zip_path}")
 
-    print("Done.")
+    print("✅ Done.")
 
 
 def ensure_paths(
