@@ -157,7 +157,7 @@ import subprocess, re
 from pathlib import Path
 
 
-def install_deb_deps_debug(deps_file: str | Path) -> None:
+def install_deb_deps(deps_file: str | Path) -> None:
     """
     Debug version: prints detailed apt-cache outputs.
     """
