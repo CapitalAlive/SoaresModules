@@ -152,36 +152,47 @@ def ensure_paths(
     return False if not errors else "\n".join(errors)
 
 
-
 def install_deb_deps(deps_file: str | Path) -> None:
+    """
+    Read package lines from `deb.deps`, resolve virtual packages,
+    and install everything in one shot without python-apt.
+    """
+    # 1) Read and clean deps file
     lines = Path(deps_file).read_text().splitlines()
-    raw = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
+    raw = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
 
-    names = []
-    for ln in raw:
-        # strip "(...)" and "|..."
-        pkg = re.sub(r"\s*\([^)]*\)", "", ln).split("|",1)[0].strip()
-        names.append(pkg)
+    # 2) Normalize names: strip "(...)" and split on "|"
+    pkgs = [
+        re.sub(r"\s*\([^)]*\)", "", ln).split("|", 1)[0].strip()
+        for ln in raw
+    ]
 
+    if not pkgs:
+        print("No packages to install.")
+        return
+
+    # 3) Refresh package lists
     subprocess.run(["sudo", "apt-get", "update"], check=True)
 
+    # 4) Resolve virtual packages and build install list
     to_install = []
-    for pkg in names:
+    for pkg in pkgs:
         print(f"→ Checking {pkg}")
-        # simulate with -y and capture all output
         res = subprocess.run(
             ["sudo", "apt-get", "install", "-y", "--simulate", pkg],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True
         )
-        out = res.stdout
-
+        output = res.stdout
         if res.returncode == 0:
             to_install.append(pkg)
         else:
-            m = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
-                          out)
+            # Look for "Note, selecting 'realpkg' instead of 'pkg'"
+            m = re.search(
+                r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
+                output
+            )
             if m:
                 real = m.group(1)
                 print(f"    ↳ Virtual {pkg} → {real}")
@@ -193,12 +204,14 @@ def install_deb_deps(deps_file: str | Path) -> None:
         print("No installable packages found.")
         return
 
+    # 5) Install all resolved packages
     print("Installing:", ", ".join(to_install))
     subprocess.run(
         ["sudo", "apt-get", "install", "-y", *to_install],
         check=True
     )
     print("Done.")
+
 
 
 if __name__ == "__main__":
