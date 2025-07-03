@@ -153,20 +153,14 @@ def ensure_paths(
 
 
 
-#!/usr/bin/env python3
-import subprocess
-import re
-from pathlib import Path
+def install_deb_deps(deps_file: str | Path) -> None:
+    # 1) Read & normalize your deps file
+    lines = Path(deps_file).read_text().splitlines()
+    raw = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
 
-def install_deb_deps(deps_path: str | Path) -> None:
-    # 1) Read and normalize package names
-    raw = Path(deps_path).read_text().splitlines()
     pkgs = []
     for ln in raw:
-        ln = ln.strip()
-        if not ln or ln.startswith('#'):
-            continue
-        # drop "(...)" and anything after "|"
+        # drop version constraints and anything after '|'
         name = re.sub(r"\s*\([^)]*\)", "", ln).split("|",1)[0].strip()
         pkgs.append(name)
 
@@ -174,18 +168,43 @@ def install_deb_deps(deps_path: str | Path) -> None:
         print("No packages to install.")
         return
 
-    # 2) Run apt-get update once
+    # 2) Refresh once
     subprocess.run(["sudo", "apt-get", "update"], check=True)
 
-    # 3) Install all packages in one go
+    # 3) Resolve each pkg
+    to_install = []
+    for pkg in pkgs:
+        print(f"→ Checking {pkg}")
+        res = subprocess.run(
+            ["sudo", "apt-get", "install", "--simulate", pkg],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        # if simulate succeeded without errors, we can install pkg
+        if res.returncode == 0:
+            to_install.append(pkg)
+            continue
+
+        # otherwise, look for “Note, selecting 'realpkg' instead of 'pkg'”
+        m = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
+                      res.stderr)
+        if m:
+            real = m.group(1)
+            print(f"    ↳ Virtual {pkg} → {real}")
+            to_install.append(real)
+        else:
+            print(f"    ⚠️  Skipping {pkg}: no candidate")
+
+    if not to_install:
+        print("No installable packages found.")
+        return
+
+    # 4) Install them all
+    print("Installing:", ", ".join(to_install))
     subprocess.run(
-        ["sudo", "apt-get", "install", "-y", *pkgs],
+        ["sudo", "apt-get", "install", "-y", *to_install],
         check=True
     )
     print("Done.")
-
-if __name__ == "__main__":
-    install_from_deps("chrome-headless-shell-linux64/deb.deps")
 
 
 if __name__ == "__main__":
