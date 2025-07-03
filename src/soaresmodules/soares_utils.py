@@ -152,62 +152,41 @@ def ensure_paths(
     return False if not errors else "\n".join(errors)
 
 
+
+#!/usr/bin/env python3
 import subprocess
 import re
 from pathlib import Path
 
-def install_deb_deps(deps_file: str | Path) -> None:
-    """
-    Read package lines from `deb.deps` (one per line, possibly with
-    version constraints or alternates), resolve them to real package
-    names via apt-get --simulate, then install.
-    """
-    deps_path = Path(deps_file)
-    raw_lines = [ln.strip() for ln in deps_path.read_text().splitlines() if ln.strip()]
-    if not raw_lines:
+def install_from_deps(deps_path: str | Path) -> None:
+    # 1) Read and normalize package names
+    raw = Path(deps_path).read_text().splitlines()
+    pkgs = []
+    for ln in raw:
+        ln = ln.strip()
+        if not ln or ln.startswith('#'):
+            continue
+        # drop "(...)" and anything after "|"
+        name = re.sub(r"\s*\([^)]*\)", "", ln).split("|",1)[0].strip()
+        pkgs.append(name)
+
+    if not pkgs:
         print("No packages to install.")
         return
 
-    # Step 1: update once
+    # 2) Run apt-get update once
     subprocess.run(["sudo", "apt-get", "update"], check=True)
 
-    resolved = []
-    for raw in raw_lines:
-        # strip version constraints
-        base = re.sub(r"\s*\(.*?\)", "", raw)
-        # split on alternates and try each
-        candidates = [c.strip() for c in base.split("|") if c.strip()]
-        for cand in candidates:
-            try:
-                # simulate install; capture stderr for “Note, selecting…”
-                result = subprocess.run(
-                    ["sudo", "apt-get", "install", "-y", "--simulate", cand],
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-            except subprocess.CalledProcessError as e:
-                # look for a provider suggestion
-                m = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(cand),
-                              e.stderr)
-                if m:
-                    provider = m.group(1)
-                    resolved.append(provider)
-                    break
-                else:
-                    # this candidate really failed; try next
-                    continue
-            else:
-                # simulation succeeded without provider note
-                resolved.append(cand)
-                break
-        else:
-            print(f"Warning: no installable candidate found for '{raw}', skipping.")
+    # 3) Install all packages in one go
+    subprocess.run(
+        ["sudo", "apt-get", "install", "-y", *pkgs],
+        check=True
+    )
+    print("Done.")
 
-    if not resolved:
-        print("No installable packages found.")
-        return
+if __name__ == "__main__":
+    install_from_deps("chrome-headless-shell-linux64/deb.deps")
 
-    # Step 2: install the resolved list
-    subprocess.run(["sudo", "apt-get", "install", "-y", *resolved], check=True)
+
+if __name__ == "__main__":
+    install_deb_deps("chrome-headless-shell-linux64/deb.deps")
