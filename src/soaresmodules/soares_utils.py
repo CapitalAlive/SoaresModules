@@ -159,60 +159,62 @@ from pathlib import Path
 
 def install_deb_deps(deps_file: str | Path) -> None:
     """
-    Debug version: prints detailed apt-cache outputs.
+    Read deb.deps, strip constraints/alternates, update apt,
+    then resolve each pkg:
+      1) If apt-cache show finds it, install that.
+      2) Else look under 'Reverse Provides:' in showpkg,
+         and take the very next non-empty line as the provider.
+    Finally batch-install them all.
     """
+    # 1) Read + clean
     lines = Path(deps_file).read_text().splitlines()
     raw = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
-    pkgs = [
-        re.sub(r"\s*\([^)]*\)", "", ln).split("|", 1)[0].strip()
-        for ln in raw
-    ]
+
+    # 2) Normalize names
+    pkgs = [re.sub(r"\s*\([^)]*\)", "", ln).split("|",1)[0].strip()
+            for ln in raw]
     if not pkgs:
         print("No packages to install.")
         return
 
-    subprocess.run(["sudo", "apt-get", "update"], check=True)
+    # 3) Refresh once
+    subprocess.run(["sudo","apt-get","update"], check=True)
 
     to_install = []
     for pkg in pkgs:
-        print(f"\n→ Resolving {pkg}")
+        print(f"→ Resolving {pkg}")
 
-        # a) Check real package
+        # a) real package?
         show = subprocess.run(
-            ["apt-cache", "show", pkg],
+            ["apt-cache","show",pkg],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
-        print(f"[DEBUG] apt-cache show {pkg} returned {len(show.stdout.splitlines())} lines")
         if show.stdout:
-            print(f"[DEBUG] {pkg} is a real package.")
             to_install.append(pkg)
             continue
 
-        # b) Debug showpkg
+        # b) virtual → parse Reverse Provides block
         sp = subprocess.run(
-            ["apt-cache", "showpkg", pkg],
+            ["apt-cache","showpkg",pkg],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
-        print(f"[DEBUG] apt-cache showpkg {pkg} output:\n{sp.stdout}")
         provider = None
         in_rev = False
         for line in sp.stdout.splitlines():
             stripped = line.strip()
-            if stripped == "Reverse Provides:":
-                print("[DEBUG] Found Reverse Provides header")
-                in_rev = True
+            if not in_rev:
+                if stripped == "Reverse Provides:":
+                    in_rev = True
                 continue
-            if in_rev:
-                if not line.startswith(" "):
-                    print("[DEBUG] End of Reverse Provides block")
-                    break
-                candidate = stripped.split()[0]
-                print(f"[DEBUG] Found provider candidate: {candidate}")
-                provider = candidate
+            # once in_rev: skip blank lines, take the first non-blank as provider
+            if stripped:
+                provider = stripped.split()[0]
+                print(f"    ↳ Virtual {pkg} → {provider}")
                 break
+            # blank line ends the block
+            break
 
         if provider:
-            print(f"    ↳ Virtual {pkg} → {provider}")
             to_install.append(provider)
         else:
             print(f"    ⚠️  Skipping {pkg}: no provider found")
@@ -221,10 +223,13 @@ def install_deb_deps(deps_file: str | Path) -> None:
         print("Nothing to install.")
         return
 
-    print("\nInstalling:", ", ".join(to_install))
-    subprocess.run(["sudo", "apt-get", "install", "-y", *to_install], check=True)
+    # 4) Install all at once
+    print("Installing:", ", ".join(to_install))
+    subprocess.run(
+        ["sudo","apt-get","install","-y", *to_install],
+        check=True
+    )
     print("Done.")
-
 
 if __name__ == "__main__":
     install_deb_deps("chrome-headless-shell-linux64/deb.deps")
