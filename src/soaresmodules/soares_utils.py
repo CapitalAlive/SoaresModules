@@ -159,18 +159,18 @@ from pathlib import Path
 
 def install_deb_deps(deps_file: str | Path) -> None:
     """
-    Read your deb.deps file, strip version constraints and alternates,
-    refresh apt’s cache, then for each entry:
-      1. Try `apt-cache show` → if found, it’s a real package.
-      2. Otherwise run `apt-cache showpkg` and parse the "Reverse Provides:"
-         section to pick the first real provider.
-    Finally, install all resolved names in one transaction.
+    1. Read and normalize your chrome-headless-shell-linux64/deb.deps file
+       (strip out “(>=…)” and alternates after “|”).
+    2. Run `sudo apt-get update` once.
+    3. For each package name:
+       a) if `apt-cache show pkg` returns something, it’s real → keep it.
+       b) otherwise, run `apt-cache showpkg pkg` and look for the “Reverse Provides:”
+          block (matching with strip()), then take the first provider listed.
+    4. Batch-install the full resolved list in one `apt-get install -y …` call.
     """
-    # 1) Read and clean the deps file
+    # 1) Read & clean
     lines = Path(deps_file).read_text().splitlines()
     raw = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
-
-    # 2) Normalize: drop "(…)" and anything after "|"
     pkgs = [
         re.sub(r"\s*\([^)]*\)", "", ln).split("|", 1)[0].strip()
         for ln in raw
@@ -179,15 +179,14 @@ def install_deb_deps(deps_file: str | Path) -> None:
         print("No packages to install.")
         return
 
-    # 3) Refresh package lists
+    # 2) Refresh lists
     subprocess.run(["sudo", "apt-get", "update"], check=True)
 
-    # 4) Resolve virtual packages
+    # 3) Resolve virtuals
     to_install = []
     for pkg in pkgs:
         print(f"→ Resolving {pkg}")
-
-        # a) Check if real package exists
+        # a) real package?
         show = subprocess.run(
             ["apt-cache", "show", pkg],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
@@ -196,7 +195,7 @@ def install_deb_deps(deps_file: str | Path) -> None:
             to_install.append(pkg)
             continue
 
-        # b) Otherwise parse 'Reverse Provides:' from showpkg
+        # b) parse Reverse Provides from showpkg
         sp = subprocess.run(
             ["apt-cache", "showpkg", pkg],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
@@ -204,13 +203,18 @@ def install_deb_deps(deps_file: str | Path) -> None:
         provider = None
         in_rev = False
         for line in sp.stdout.splitlines():
-            if line.startswith("Reverse Provides:"):
+            # strip leading/trailing spaces for detection
+            stripped = line.strip()
+            if stripped == "Reverse Provides:":
                 in_rev = True
                 continue
             if in_rev:
+                # stop once block ends
                 if not line.startswith(" "):
                     break
-                provider = line.strip().split()[0]
+                # first non-empty indented line is our provider
+                candidate = stripped.split()[0]
+                provider = candidate
                 break
 
         if provider:
@@ -223,12 +227,9 @@ def install_deb_deps(deps_file: str | Path) -> None:
         print("Nothing to install.")
         return
 
-    # 5) Install all resolved packages in one go
+    # 4) Batch install
     print("Installing:", ", ".join(to_install))
-    subprocess.run(
-        ["sudo", "apt-get", "install", "-y", *to_install],
-        check=True
-    )
+    subprocess.run(["sudo", "apt-get", "install", "-y", *to_install], check=True)
     print("Done.")
 
 if __name__ == "__main__":
