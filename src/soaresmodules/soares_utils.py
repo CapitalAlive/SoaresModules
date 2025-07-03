@@ -152,44 +152,62 @@ def ensure_paths(
     return False if not errors else "\n".join(errors)
 
 
+import subprocess
+import re
+from pathlib import Path
+
 def install_deb_deps(deps_file: str | Path) -> None:
     """
-    Read package names from a `deb.deps` file (one per line),
-    simulate each install to resolve virtual-package providers,
-    then run `sudo apt-get install -y` on the real package names.
+    Read package lines from `deb.deps` (one per line, possibly with
+    version constraints or alternates), resolve them to real package
+    names via apt-get --simulate, then install.
     """
     deps_path = Path(deps_file)
-    raw_pkgs = [line.strip() for line in deps_path.read_text().splitlines() if line.strip()]
-    if not raw_pkgs:
+    raw_lines = [ln.strip() for ln in deps_path.read_text().splitlines() if ln.strip()]
+    if not raw_lines:
         print("No packages to install.")
         return
 
-    # Refresh package lists
+    # Step 1: update once
     subprocess.run(["sudo", "apt-get", "update"], check=True)
 
     resolved = []
-    for pkg in raw_pkgs:
-        try:
-            # simulate install to see if apt suggests a real provider
-            subprocess.run(
-                ["sudo", "apt-get", "install", "-y", "--simulate", pkg],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            resolved.append(pkg)
-        except subprocess.CalledProcessError as e:
-            note = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
-                             e.stderr)
-            if note:
-                resolved.append(note.group(1))
+    for raw in raw_lines:
+        # strip version constraints
+        base = re.sub(r"\s*\(.*?\)", "", raw)
+        # split on alternates and try each
+        candidates = [c.strip() for c in base.split("|") if c.strip()]
+        for cand in candidates:
+            try:
+                # simulate install; capture stderr for “Note, selecting…”
+                result = subprocess.run(
+                    ["sudo", "apt-get", "install", "-y", "--simulate", cand],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+            except subprocess.CalledProcessError as e:
+                # look for a provider suggestion
+                m = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(cand),
+                              e.stderr)
+                if m:
+                    provider = m.group(1)
+                    resolved.append(provider)
+                    break
+                else:
+                    # this candidate really failed; try next
+                    continue
             else:
-                print(f"Warning: no installable candidate found for '{pkg}', skipping.")
+                # simulation succeeded without provider note
+                resolved.append(cand)
+                break
+        else:
+            print(f"Warning: no installable candidate found for '{raw}', skipping.")
 
     if not resolved:
         print("No installable packages found.")
         return
 
-    # Install all the real package names at once
+    # Step 2: install the resolved list
     subprocess.run(["sudo", "apt-get", "install", "-y", *resolved], check=True)
