@@ -2,8 +2,8 @@ import os
 import urllib.request
 import zipfile
 import subprocess
+import re
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 def download_and_extract_zip(
@@ -19,35 +19,36 @@ def download_and_extract_zip(
 
     Args:
         url (str): URL of the ZIP file to download.
-        dest_folder (str | Path): Directory path where the file will be saved/extracted.
-        unzip (bool): If True, extract the ZIP archive into `dest_folder` after download.
-        delete_zip (bool): If True, delete the downloaded ZIP file after extraction.
+        dest_folder (str | Path): Directory path (string or Path) where the file will be saved/extracted.
+        unzip (bool): If True, extract the ZIP archive into `dest_folder` after download. Defaults to True.
+        delete_zip (bool): If True, delete the downloaded ZIP file after extraction. Defaults to True.
 
     Raises:
         URLError, HTTPError: If downloading the file fails.
-        zipfile.BadZipFile: If the file is not a valid ZIP archive.
+        zipfile.BadZipFile: If the downloaded file is not a valid ZIP archive.
     """
-    # 1) Ensure dest_folder is a Path and exists
+    # Normalize destination to Path
     dest_folder = Path(dest_folder)
     dest_folder.mkdir(parents=True, exist_ok=True)
 
-    # 2) Figure out a safe filename from the URL
-    zip_name = Path(urlparse(url).path).name
+    # Determine zip filename and full path
+    zip_name = os.path.basename(url)
     zip_path = dest_folder / zip_name
 
-    print(f"→ Downloading {url} …")
+    print(f"Downloading from {url}...")
+    # urllib expects a string path
     urllib.request.urlretrieve(url, str(zip_path))
 
     if unzip:
-        print(f"→ Extracting to {dest_folder} …")
-        with zipfile.ZipFile(zip_path, 'r') as archive:
-            archive.extractall(dest_folder)
+        print(f"Extracting to {dest_folder}...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(dest_folder)
 
     if delete_zip:
         zip_path.unlink()
-        print(f"→ Removed archive {zip_path}")
+        print(f"Deleted zip file: {zip_path}")
 
-    print("✅ Done.")
+    print("Done.")
 
 
 def ensure_paths(
@@ -153,21 +154,27 @@ def ensure_paths(
 
 def install_deb_deps(deps_file: str | Path) -> None:
     """
-    Read package names from a `deb.deps` file (one per line)
-    and run `sudo apt-get update` and `sudo apt-get install -y` on them.
-
-    Args:
-        deps_file: Path (string or Path) to the `deb.deps` file.
-
-    Raises:
-        CalledProcessError: If subprocess commands fail.
+    Read package names from a `deb.deps` file (one per line),
+    strip out version constraints and alternatives,
+    then run `sudo apt-get update` and `sudo apt-get install -y` on them.
     """
     deps_path = Path(deps_file)
-    pkgs = [line.strip() for line in deps_path.read_text().splitlines() if line.strip()]
+    lines = deps_path.read_text().splitlines()
+    pkgs = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # take only the first alternative, if any
+        candidate = line.split("|", 1)[0].strip()
+        # remove any version constraint in parentheses
+        name = re.sub(r"\s*\(.*\)$", "", candidate)
+        pkgs.append(name)
+
     if not pkgs:
         print("No packages to install.")
         return
 
-    # Update package lists and install in one go
     subprocess.run(["sudo", "apt-get", "update"], check=True)
     subprocess.run(["sudo", "apt-get", "install", "-y", *pkgs], check=True)
