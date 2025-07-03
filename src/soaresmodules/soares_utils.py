@@ -154,51 +154,45 @@ def ensure_paths(
 
 
 def install_deb_deps(deps_file: str | Path) -> None:
-    # 1) Read & normalize your deps file
     lines = Path(deps_file).read_text().splitlines()
-    raw = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
+    raw = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
 
-    pkgs = []
+    names = []
     for ln in raw:
-        # drop version constraints and anything after '|'
-        name = re.sub(r"\s*\([^)]*\)", "", ln).split("|",1)[0].strip()
-        pkgs.append(name)
+        # strip "(...)" and "|..."
+        pkg = re.sub(r"\s*\([^)]*\)", "", ln).split("|",1)[0].strip()
+        names.append(pkg)
 
-    if not pkgs:
-        print("No packages to install.")
-        return
-
-    # 2) Refresh once
     subprocess.run(["sudo", "apt-get", "update"], check=True)
 
-    # 3) Resolve each pkg
     to_install = []
-    for pkg in pkgs:
+    for pkg in names:
         print(f"→ Checking {pkg}")
+        # simulate with -y and capture all output
         res = subprocess.run(
-            ["sudo", "apt-get", "install", "--simulate", pkg],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            ["sudo", "apt-get", "install", "-y", "--simulate", pkg],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
         )
-        # if simulate succeeded without errors, we can install pkg
+        out = res.stdout
+
         if res.returncode == 0:
             to_install.append(pkg)
-            continue
-
-        # otherwise, look for “Note, selecting 'realpkg' instead of 'pkg'”
-        m = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
-                      res.stderr)
-        if m:
-            real = m.group(1)
-            print(f"    ↳ Virtual {pkg} → {real}")
-            to_install.append(real)
         else:
-            print(f"    ⚠️  Skipping {pkg}: no candidate")
+            m = re.search(r"Note, selecting '([^']+)' instead of '%s'" % re.escape(pkg),
+                          out)
+            if m:
+                real = m.group(1)
+                print(f"    ↳ Virtual {pkg} → {real}")
+                to_install.append(real)
+            else:
+                print(f"    ⚠️  Skipping {pkg}: no candidate")
 
     if not to_install:
         print("No installable packages found.")
         return
 
-    # 4) Install them all
     print("Installing:", ", ".join(to_install))
     subprocess.run(
         ["sudo", "apt-get", "install", "-y", *to_install],
