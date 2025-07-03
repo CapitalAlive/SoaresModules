@@ -51,8 +51,8 @@ def download_and_extract_zip(
 
 
 def ensure_paths(
-    dirs_list: list[str] | None = None,
-    file_paths: list[str] | None = None,
+    dirs_list: list[str | Path] | None = None,
+    file_paths: list[str | Path] | None = None,
     create_dir: bool = False,
     create_file: bool = False
 ) -> bool | str:
@@ -76,8 +76,8 @@ def ensure_paths(
           3. Verify the file is readable, writable, and executable.
 
     Args:
-        dirs_list:     List of directories to check.
-        file_paths:    List of file paths to check.
+        dirs_list:     List of directories (str or Path) to check.
+        file_paths:    List of file paths (str or Path) to check.
         create_dir:    If True, create missing directories.
         create_file:   If True, create missing files (and their parents).
 
@@ -91,16 +91,23 @@ def ensure_paths(
     if dirs_list:
         for d in dirs_list:
             try:
-                if not os.path.exists(d):
+                dir_path = Path(d)
+                if not dir_path.exists():
                     if create_dir:
-                        os.makedirs(d, exist_ok=True)
+                        dir_path.mkdir(parents=True, exist_ok=True)
                     else:
-                        errors.append(f"Directory does not exist: {d}. Create it or set create_dir=True.")
+                        errors.append(
+                            f"Directory does not exist: {dir_path}. Create it or set create_dir=True."
+                        )
                         continue
-                if not os.access(d, os.R_OK):
-                    errors.append(f"Directory is not readable: {d}. Set read permission: chmod +r '{d}'")
-                if not os.access(d, os.W_OK):
-                    errors.append(f"Directory is not writable: {d}. Set write permission: chmod +w '{d}'")
+                if not os.access(dir_path, os.R_OK):
+                    errors.append(
+                        f"Directory is not readable: {dir_path}. Set read permission: chmod +r '{dir_path}'"
+                    )
+                if not os.access(dir_path, os.W_OK):
+                    errors.append(
+                        f"Directory is not writable: {dir_path}. Set write permission: chmod +w '{dir_path}'"
+                    )
             except Exception as e:
                 errors.append(f"Error handling directory '{d}': {e}")
 
@@ -108,45 +115,59 @@ def ensure_paths(
     if file_paths:
         for f in file_paths:
             try:
-                parent = os.path.dirname(f) or '.'
-                if not os.path.exists(parent):
+                file_path = Path(f)
+                parent = file_path.parent or Path('.')
+                if not parent.exists():
                     if create_file:
-                        os.makedirs(parent, exist_ok=True)
+                        parent.mkdir(parents=True, exist_ok=True)
                     else:
-                        errors.append(f"Parent directory does not exist: {parent}. Create it or set create_file=True.")
+                        errors.append(
+                            f"Parent directory does not exist: {parent}. Create it or set create_file=True."
+                        )
                         continue
-
-                if not os.path.exists(f):
+                if not file_path.exists():
                     if create_file:
-                        open(f, 'a').close()
+                        file_path.touch()
                     else:
-                        errors.append(f"File does not exist: {f}. Create it or set create_file=True.")
+                        errors.append(
+                            f"File does not exist: {file_path}. Create it or set create_file=True."
+                        )
                         continue
-
-                if not os.access(f, os.R_OK):
-                    errors.append(f"File is not readable: {f}. Set read permission: chmod +r '{f}'")
-                if not os.access(f, os.W_OK):
-                    errors.append(f"File is not writable: {f}. Set write permission: chmod +w '{f}'")
-                if not os.access(f, os.X_OK):
-                    errors.append(f"File is not executable: {f}. Set execute permission: chmod +x '{f}'")
+                if not os.access(file_path, os.R_OK):
+                    errors.append(
+                        f"File is not readable: {file_path}. Set read permission: chmod +r '{file_path}'"
+                    )
+                if not os.access(file_path, os.W_OK):
+                    errors.append(
+                        f"File is not writable: {file_path}. Set write permission: chmod +w '{file_path}'"
+                    )
+                if not os.access(file_path, os.X_OK):
+                    errors.append(
+                        f"File is not executable: {file_path}. Set execute permission: chmod +x '{file_path}'"
+                    )
             except Exception as e:
                 errors.append(f"Error handling file '{f}': {e}")
 
     return False if not errors else "\n".join(errors)
 
 
-def install_deb_deps(deps_file: Path):
+def install_deb_deps(deps_file: str | Path) -> None:
     """
     Read package names from a `deb.deps` file (one per line)
-    and run `sudo apt-get install -y` on them.
+    and run `sudo apt-get update` and `sudo apt-get install -y` on them.
+
+    Args:
+        deps_file: Path (string or Path) to the `deb.deps` file.
+
+    Raises:
+        CalledProcessError: If subprocess commands fail.
     """
-    pkgs = [line.strip() for line in deps_file.read_text().splitlines() if line.strip()]
+    deps_path = Path(deps_file)
+    pkgs = [line.strip() for line in deps_path.read_text().splitlines() if line.strip()]
     if not pkgs:
         print("No packages to install.")
         return
 
-    cmd = ["sudo", "apt-get", "update"]
-    subprocess.run(cmd, check=True)
-
-    cmd = ["sudo", "apt-get", "install", "-y"] + pkgs
-    subprocess.run(cmd, check=True)
+    # Update package lists and install in one go
+    subprocess.run(["sudo", "apt-get", "update"], check=True)
+    subprocess.run(["sudo", "apt-get", "install", "-y", *pkgs], check=True)
