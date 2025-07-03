@@ -156,31 +156,49 @@ def ensure_paths(
 import subprocess, re
 from pathlib import Path
 
+
 def install_deb_deps(deps_file: str | Path) -> None:
-    # Read and clean
+    """
+    Read your deb.deps file, strip version constraints and alternates,
+    refresh apt’s cache, then for each entry:
+      1. Try `apt-cache show` → if found, it’s a real package.
+      2. Otherwise run `apt-cache showpkg` and parse the "Reverse Provides:"
+         section to pick the first real provider.
+    Finally, install all resolved names in one transaction.
+    """
+    # 1) Read and clean the deps file
     lines = Path(deps_file).read_text().splitlines()
-    raw = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
-    pkgs = [ re.sub(r"\s*\([^)]*\)", "", ln).split("|",1)[0].strip()
-             for ln in raw ]
+    raw = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
 
-    subprocess.run(["sudo","apt-get","update"], check=True)
+    # 2) Normalize: drop "(…)" and anything after "|"
+    pkgs = [
+        re.sub(r"\s*\([^)]*\)", "", ln).split("|", 1)[0].strip()
+        for ln in raw
+    ]
+    if not pkgs:
+        print("No packages to install.")
+        return
 
+    # 3) Refresh package lists
+    subprocess.run(["sudo", "apt-get", "update"], check=True)
+
+    # 4) Resolve virtual packages
     to_install = []
     for pkg in pkgs:
         print(f"→ Resolving {pkg}")
 
-        # 1) real package?
+        # a) Check if real package exists
         show = subprocess.run(
-            ["apt-cache","show",pkg],
+            ["apt-cache", "show", pkg],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
         if show.stdout:
             to_install.append(pkg)
             continue
 
-        # 2) virtual → check Reverse Provides:
+        # b) Otherwise parse 'Reverse Provides:' from showpkg
         sp = subprocess.run(
-            ["apt-cache","showpkg",pkg],
+            ["apt-cache", "showpkg", pkg],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
         provider = None
@@ -192,7 +210,6 @@ def install_deb_deps(deps_file: str | Path) -> None:
             if in_rev:
                 if not line.startswith(" "):
                     break
-                # e.g. " libasound2t64 1.2.11-1ubuntu0.1"
                 provider = line.strip().split()[0]
                 break
 
@@ -206,13 +223,13 @@ def install_deb_deps(deps_file: str | Path) -> None:
         print("Nothing to install.")
         return
 
+    # 5) Install all resolved packages in one go
     print("Installing:", ", ".join(to_install))
     subprocess.run(
-        ["sudo","apt-get","install","-y", *to_install],
+        ["sudo", "apt-get", "install", "-y", *to_install],
         check=True
     )
     print("Done.")
-
 
 if __name__ == "__main__":
     install_deb_deps("chrome-headless-shell-linux64/deb.deps")
